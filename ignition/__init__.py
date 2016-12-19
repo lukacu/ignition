@@ -10,6 +10,8 @@ import signal
 import json
 import shlex
 
+from .graph import toposort
+
 # http://www.pixelbeat.org/programming/stdio_buffering/
 BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = xrange(30, 38)
 LIGHTBLACK, LIGHTRED, LIGHTGREEN, LIGHTYELLOW, LIGHTBLUE, LIGHTMAGENTA, LIGHTCYAN, LIGHTWHITE = xrange(
@@ -27,6 +29,7 @@ elif sys.platform == "darwin":
 elif sys.platform == "win32":
     PLATFORM = "windows"
 
+
 def print_colored(message, color=BLACK, bold=False):
     if bold:
         sys.stdout.write(COLOR_SEQ % (color) + BOLD_SEQ)
@@ -35,16 +38,32 @@ def print_colored(message, color=BLACK, bold=False):
     sys.stdout.write(message)
     sys.stdout.write(RESET_SEQ)
 
+
+def clean_dictionary(dictionary, *keys):
+    for key in keys:
+        if key in dictionary:
+            del dictionary[key]
+
+
 def import_plugin(cl):
     d = cl.rfind(".")
     classname = cl[d+1:len(cl)]
     m = __import__(cl[0:d], globals(), locals(), [classname])
     return getattr(m, classname)()
 
+
 def run_plugins(plugins, handle, *args, **kwargs):
     for plugin in plugins:
         if hasattr(plugin, handle):
             getattr(plugin, handle)(*args, **kwargs)
+
+class ProgramObserver(object):
+
+    def on_start(self, program):
+        pass
+
+    def on_stop(self, program):
+        pass
 
 class ProgramHandler(object):
 
@@ -54,25 +73,31 @@ class ProgramHandler(object):
                   LIGHTRED, LIGHTGREEN, LIGHTYELLOW, LIGHTBLUE, LIGHTMAGENTA, LIGHTCYAN, LIGHTWHITE)
     color_next = 0
 
-    def __init__(self, identifier, command, directory=None, required=False, restart=False, environment={}, **kwargs):
+    def __init__(self, identifier, command, directory=None, environment={}, **kwargs):
         self.thread = threading.Thread(target=self.run)
         self.thread.daemon = True
         self.identifier = identifier
         self.command = shlex.split(command)
         self.directory = directory
-        self.required = required
-        self.restart = restart
+        self.required = kwargs.get("required", False)
+        self.restart = kwargs.get("restart", False)
         self.running = False
         self.process = None
         self.environment = os.environ.copy()
         self.environment.update(environment)
         self.console = kwargs.get("console", True)
+        self.depends = kwargs.get("depends", [])
+        self.delay = kwargs.get("delay", 0)
         self.color = ProgramHandler.color_pool[
             ProgramHandler.color_next % len(ProgramHandler.color_pool)]
         ProgramHandler.color_next = ProgramHandler.color_next + 1
         if self.console and PLATFORM == "linux":
             self.command.insert(0, 'stdbuf')
             self.command.insert(1, '-oL')
+        self.observers = []
+
+    def observe(self, observer):
+        self.observers.append(observer)
 
     def start(self):
         if self.running:
@@ -147,6 +172,8 @@ class ProgramGroup(object):
         self.environment.update(config.get("environment", {}))
         programs = config.get("programs", {})
         for identifier, parameters in programs.items():
+            if parameters.get("ignore", False):
+                continue
             if isinstance(parameters, basestring):
                 root = os.path.dirname(self.source)
                 try:
@@ -163,38 +190,47 @@ class ProgramGroup(object):
                 item = ProgramHandler(identifier,
                                       **parameters)
                 run_plugins(
-                    self.plugins, 'on_program_init', self.programs[item], **parameters)
+                    self.plugins, 'on_program_init', item, **parameters)
             self.programs[identifier] = item
 
-        self.shutdown_sequence = config.get("shutdown", self.programs.keys())
-        self.startup_sequence = config.get("startup", self.programs.keys())
-
+        clean_dictionary(config, "plugins", "handle")
         run_plugins(self.plugins, 'on_group_init', self, **config)
+
+        graph = {}
+        for i, program in self.programs.items():
+            dependencies = set()
+            for d in program.depends:
+                if not d in self.programs:
+                    raise ValueError("Dependency %s not defined" % d)
+                dependencies.add(d)
+            graph[i] = dependencies
+
+        blocks = toposort(graph)
+        print blocks
+
+        sequence = []
+        for block in blocks:
+            sequence.extend(list(block))
+        self.startup_sequence = sequence
 
     def start(self):
         run_plugins(self.plugins, 'on_group_start', self)
         for item in self.startup_sequence:
-            if isinstance(item, basestring):
-                run_plugins(
-                    self.plugins, 'on_program_start', self.programs[item])
-                self.programs[item].start()
-                run_plugins(
-                    self.plugins, 'on_program_started', self.programs[item])
-            else:
-                time.sleep(item)
+            run_plugins(
+                self.plugins, 'on_program_start', self.programs[item])
+            self.programs[item].start()
+            run_plugins(
+                self.plugins, 'on_program_started', self.programs[item])
         run_plugins(self.plugins, 'on_group_started', self)
 
     def stop(self):
         run_plugins(self.plugins, 'on_group_stop', self)
-        for item in self.shutdown_sequence:
-            if isinstance(item, basestring):
-                run_plugins(
-                    self.plugins, 'on_program_stop', self.programs[item])
-                self.programs[item].stop()
-                run_plugins(
-                    self.plugins, 'on_program_stopped', self.programs[item])
-            else:
-                time.sleep(item)
+        for item in reversed(self.startup_sequence):
+            run_plugins(
+                self.plugins, 'on_program_stop', self.programs[item])
+            self.programs[item].stop()
+            run_plugins(
+                self.plugins, 'on_program_stopped', self.programs[item])
         run_plugins(self.plugins, 'on_group_stopped', self)
 
     def valid(self):

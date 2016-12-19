@@ -1,12 +1,13 @@
 import os, sys
 import shlex
+import time
 
 class Plugin(object):
 
 	def __init__(self):
 		pass
 
-class DebugWrapper(Plugin):
+class Debug(Plugin):
 
 	def __init__(self):
 		super(Plugin, self).__init__()
@@ -16,4 +17,19 @@ class DebugWrapper(Plugin):
 		program.debug = kwargs.get("debug", False)
 		if program.debug:
 			program.command = self._prefix + program.command
+
+class Wait(Plugin):
+
+	def __init__(self):
+		super(Plugin, self).__init__()
+
+	def on_program_init(self, program, **kwargs):
+		program.wait = kwargs.get("wait", 0)
+
+	def on_program_started(self, program, **kwargs):
+		wait = getattr(program, "wait", 0)
+		if wait > 0:
+			time.sleep(wait)
+
+
 
