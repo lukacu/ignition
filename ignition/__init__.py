@@ -1,6 +1,7 @@
 from __future__ import absolute_import
 
 import os
+import re
 import sys
 import time
 import subprocess
@@ -57,6 +58,33 @@ def run_plugins(plugins, handle, *args, **kwargs):
         if hasattr(plugin, handle):
             getattr(plugin, handle)(*args, **kwargs)
 
+def expandvars(path, default=None, additional={}, skip_escaped=True):
+    """Expand environment variables of form $var and ${var}.
+       If parameter 'skip_escaped' is True, all escaped variable references
+       (i.e. preceded by backslashes) are skipped.
+       Unknown variables are set to 'default'. If 'default' is None,
+       they are left unchanged.
+    """
+    if not path:
+        return path
+    def replace_var(m):
+        varname = m.group(2) or m.group(1)
+        if additional and varname in additional:
+            return additional[varname]
+        return os.environ.get(varname, m.group(0) if default is None else default)
+    reVar = (r'(?<!\\)' if skip_escaped else '') + r'\$(\w+|\{([^}]*)\})'
+    return re.sub(reVar, replace_var, path)
+
+def mergevars(base, update):
+    result = dict(base)
+    for var in update.keys():
+        additional = dict(update)
+        del additional[var]
+        env = dict(base)
+        env.update(additional)
+        result[var] = expandvars(update[var], additional=env)
+    return result
+
 class ProgramObserver(object):
 
     def on_start(self, program):
@@ -77,8 +105,8 @@ class ProgramHandler(object):
         self.thread = threading.Thread(target=self.run)
         self.thread.daemon = True
         self.identifier = identifier
-        self.command = shlex.split(command)
-        self.directory = directory
+        self.command = shlex.split(expandvars(command, additional=environment))
+        self.directory = expandvars(directory, additional=environment)
         self.required = kwargs.get("required", False)
         self.restart = kwargs.get("restart", False)
         self.running = False
@@ -168,8 +196,7 @@ class ProgramGroup(object):
         self.programs = {}
         self.parent = parent
         self.plugins = [import_plugin(p) for p in config.get("plugins", [])]
-        self.environment = parent.environment.copy() if parent else {}
-        self.environment.update(config.get("environment", {}))
+        self.environment = mergevars(parent.environment if parent else {}, config.get("environment", {}))
         programs = config.get("programs", {})
         for identifier, parameters in programs.items():
             if parameters.get("ignore", False):
@@ -184,9 +211,7 @@ class ProgramGroup(object):
             else:
                 if not parameters.has_key("command"):
                     continue
-                tmpenv = parameters.get("environment", {})
-                parameters["environment"] = self.environment.copy()
-                parameters["environment"].update(tmpenv)
+                parameters["environment"] = mergevars(self.environment, parameters.get("environment", {}))
                 item = ProgramHandler(identifier,
                                       **parameters)
                 run_plugins(
@@ -206,8 +231,6 @@ class ProgramGroup(object):
             graph[i] = dependencies
 
         blocks = toposort(graph)
-        print blocks
-
         sequence = []
         for block in blocks:
             sequence.extend(list(block))
