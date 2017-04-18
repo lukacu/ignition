@@ -197,16 +197,17 @@ class ProgramGroup(object):
         self.parent = parent
         self.plugins = [import_plugin(p) for p in config.get("plugins", [])]
         self.environment = mergevars(parent.environment if parent else {}, config.get("environment", {}))
+        self.depends = config.get("depends", [])
         programs = config.get("programs", {})
         for identifier, parameters in programs.items():
             if parameters.get("ignore", False):
                 continue
-            if isinstance(parameters, basestring):
+            if parameters.has_key("include"):
                 root = os.path.dirname(self.source)
                 try:
-                    item = ProgramGroup(os.path.join(root, parameters), self)
+                    item = ProgramGroup(os.path.join(root, parameters["include"]), self)
                 except ValueError, e:
-                    print "Error opening %s: %s" % (os.path.join(root, parameters), e)
+                    print "Error opening %s: %s" % (os.path.join(root, parameters["include"]), e)
                     raise ValueError("Unable to load included launch file")
             else:
                 if not parameters.has_key("command"):
@@ -259,7 +260,6 @@ class ProgramGroup(object):
     def valid(self):
         valid = 0
         for program in self.programs.values():
-            # print program.identifier, program.healthy()
             if program.valid():
                 valid = valid + 1
             elif getattr(program, "required", True):
