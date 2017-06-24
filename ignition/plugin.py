@@ -31,5 +31,9 @@ class Wait(Plugin):
 		if wait > 0:
 			time.sleep(wait)
 
+	def on_program_stopped(self, program, **kwargs):
+		wait = getattr(program, "wait", 0)
+		if wait > 0:
+			time.sleep(wait)
 
 

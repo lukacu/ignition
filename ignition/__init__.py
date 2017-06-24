@@ -45,13 +45,11 @@ def clean_dictionary(dictionary, *keys):
         if key in dictionary:
             del dictionary[key]
 
-
 def import_plugin(cl):
     d = cl.rfind(".")
     classname = cl[d+1:len(cl)]
     m = __import__(cl[0:d], globals(), locals(), [classname])
     return getattr(m, classname)()
-
 
 def run_plugins(plugins, handle, *args, **kwargs):
     for plugin in plugins:
@@ -85,6 +83,35 @@ def mergevars(base, update):
         result[var] = expandvars(update[var], additional=env)
     return result
 
+def get_userid(username):
+    from pwd import getpwnam
+    if username is None:
+        return (None, "")
+    try:
+        return (getpwnam(username).pw_uid, username)
+    except KeyError:
+        print "Warning: user %s does not exist" % username 
+        return (None, "")
+
+def get_groupid(groupname):
+    from grp import getgrnam
+    if groupname is None:
+        return (None, "")
+    try:
+        return (getgrnam(groupname).gr_gid, groupname)
+    except KeyError:
+        print "Warning: group %s does not exist" % groupname 
+        return (None, "")
+
+def prepare_and_demote(user_uid, user_gid):
+    def result():
+        os.setpgrp()
+        if not user_gid is None:
+            os.setgid(user_gid)
+        if not user_uid is None:
+            os.setuid(user_uid)
+    return result
+
 class ProgramObserver(object):
 
     def on_start(self, program):
@@ -101,7 +128,8 @@ class ProgramHandler(object):
                   LIGHTRED, LIGHTGREEN, LIGHTYELLOW, LIGHTBLUE, LIGHTMAGENTA, LIGHTCYAN, LIGHTWHITE)
     color_next = 0
 
-    def __init__(self, identifier, command, directory=None, environment={}, **kwargs):
+    def __init__(self, identifier, command, directory=None, environment={}, log=None,
+        user=None, group=None, **kwargs):
         self.thread = threading.Thread(target=self.run)
         self.thread.daemon = True
         self.identifier = identifier
@@ -111,10 +139,13 @@ class ProgramHandler(object):
         self.restart = kwargs.get("restart", False)
         self.running = False
         self.process = None
+        self.log = log
         self.environment = os.environ.copy()
         self.environment.update(environment)
         self.console = kwargs.get("console", True)
         self.depends = kwargs.get("depends", [])
+        self.user = get_userid(user)
+        self.group = get_groupid(group)
         self.delay = kwargs.get("delay", 0)
         self.color = ProgramHandler.color_pool[
             ProgramHandler.color_next % len(ProgramHandler.color_pool)]
@@ -123,6 +154,15 @@ class ProgramHandler(object):
             self.command.insert(0, 'stdbuf')
             self.command.insert(1, '-oL')
         self.observers = []
+
+        if not self.log is None:
+            if not os.path.isdir(os.path.dirname(self.log)):
+                os.makedirs(os.path.dirname(self.log))
+
+        self.logfile = open(self.log, 'w') if not self.log is None else None
+        self.attempts = 0
+
+
 
     def observe(self, observer):
         self.observers.append(observer)
@@ -133,59 +173,84 @@ class ProgramHandler(object):
         self.thread.start()
 
     def run(self):
-        returncode = 0
-        try:
-            self.announce("Starting program")
-            self.process = subprocess.Popen(self.command, shell=False,
-                                            bufsize=0, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                            env=self.environment, cwd=self.directory)
-            self.running = True
+        self.running = True
+        while self.running:
+            returncode = 0
+            try:
+                self.attempts = self.attempts + 1
+                self.announce("Starting program (attempt %d)" % self.attempts)
 
-            self.announce("PID = %d" % self.process.pid)
+                preexec_fn = prepare_and_demote(self.user[0], self.group[0])
+                self.process = subprocess.Popen(self.command, shell=False,
+                                                bufsize=0, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                                env=self.environment, cwd=self.directory, preexec_fn=preexec_fn)
 
-            while True:
-                logline = self.process.stdout.readline()
-                if logline:
-                    if self.console:
-                        ProgramHandler.mutex.acquire()
-                        print_colored(
-                            "[%s]: " % self.identifier.ljust(20, ' '), self.color)
-                        # new line is already present
-                        sys.stdout.write(logline)
-                        ProgramHandler.mutex.release()
+                self.announce("PID = %d" % self.process.pid)
+
+                while True:
+                    logline = self.process.stdout.readline()
+                    if logline:
+                        if self.console:
+                            ProgramHandler.mutex.acquire()
+                            print_colored(
+                                "[%s]: " % self.identifier.ljust(20, ' '), self.color)
+                            # new line is already present
+                            sys.stdout.write(logline)
+                            ProgramHandler.mutex.release()
+                        if not self.logfile is None:
+                            self.logfile.write(logline)
+                    else:
+                        break
+
+                self.process.wait()
+
+                returncode = self.process.returncode
+            except OSError as err:
+                self.announce("Error: %s" % str(err))
+
+            if returncode != None:
+                if returncode < 0:
+                    self.announce("Program has stopped (signal %d)" % -returncode)
                 else:
-                    break
+                    self.announce("Program has stopped (exit code %d)" % returncode)
+            else:
+                self.announce("Execution stopped because of an error")
 
-            self.process.wait()
+            if not self.running:
+                break
 
-            returncode = self.process.returncode
-        except OSError as err:
-            self.announce("Error: %s" % str(err))
+            if self.restart is False:
+                break
 
-        self.running = False
+            if not self.restart is True and self.restart == self.attempts:
+                self.announce("Maximum numer of attempts reached, giving up.")
+                break
 
-        if returncode != None:
-            self.announce("Program has stopped (exit code %d)" % returncode)
-        else:
-            self.announce("Execution stopped because of an error")
+            self.announce("Restarting program.")
+            time.sleep(1)
 
     def announce(self, message):
         ProgramHandler.mutex.acquire()
         print_colored("[%s]: " % self.identifier.ljust(20, ' '), self.color)
         print message
+        if not self.logfile is None:
+            self.logfile.write(message)
+            self.logfile.write("\n")
         ProgramHandler.mutex.release()
 
     def stop(self):
-        if self.process:
+        if self.running:
+            self.running = False
             try:
-                self.process.terminate()  # send_signal(signal.CTRL_C_EVENT)
+                if self.process:
+                    self.process.terminate()  # send_signal(signal.CTRL_C_EVENT)
             except OSError:
                 pass
         self.thread.join(1)
 
     def valid(self):
         # Is valid if it is running or it was not even executed
-        return self.running or not self.process
+        return self.running or self.attempts == 0
 
 
 class ProgramGroup(object):
@@ -193,12 +258,17 @@ class ProgramGroup(object):
     def __init__(self, launchfile, parent=None):
         config = json.load(open(launchfile, 'r'))
         self.source = launchfile
+        self.title = config.get("title", os.path.basename(launchfile))
+        self.log = config.get("log", parent.log if not parent is None else None)
+        self.user = config.get("user", parent.user if not parent is None else None)
+        self.group = config.get("group", parent.group if not parent is None else None)
         self.programs = {}
         self.parent = parent
         self.plugins = [import_plugin(p) for p in config.get("plugins", [])]
         self.environment = mergevars(parent.environment if parent else {}, config.get("environment", {}))
         self.depends = config.get("depends", [])
         programs = config.get("programs", {})
+
         for identifier, parameters in programs.items():
             if parameters.get("ignore", False):
                 continue
@@ -210,6 +280,12 @@ class ProgramGroup(object):
                     print "Error opening %s: %s" % (os.path.join(root, parameters["include"]), e)
                     raise ValueError("Unable to load included launch file")
             else:
+                if not parameters.has_key("user"):
+                    parameters["user"] = self.user
+                if not parameters.has_key("group"):
+                    parameters["group"] = self.group
+                if not parameters.has_key("log") and not self.log is None:
+                    parameters["log"] = os.path.join(self.log, "%s.log" % identifier)
                 if not parameters.has_key("command"):
                     continue
                 parameters["environment"] = mergevars(self.environment, parameters.get("environment", {}))

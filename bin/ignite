@@ -17,8 +17,15 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 import sys, time
+import signal
 
 from ignition import ProgramGroup
+
+running = True
+
+def shutdown_handler(signum, frame):
+    global running
+    running = False
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
@@ -28,12 +35,14 @@ if __name__ == '__main__':
             print "Error opening launch file %s: %s" % (sys.argv[1], e)
             sys.exit(1)
 
+        signal.signal(signal.SIGTERM, shutdown_handler)
+
         group.announce("Starting up ...")
         group.start()
         time.sleep(1)
 
         try:
-            while group.valid():
+            while group.valid() and running:
                 time.sleep(1)
         except KeyboardInterrupt:
             pass
@@ -41,6 +50,7 @@ if __name__ == '__main__':
         group.stop()
         group.announce("Shutting down ...")
 
+        sys.exit(0)
     else:
         print "Missing launch file"
         sys.exit(1)
