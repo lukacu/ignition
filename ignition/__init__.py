@@ -95,17 +95,25 @@ def get_userid(username):
 
 def get_groupid(groupname):
     from grp import getgrnam
+    if isinstance(groupname, list):
+        gids = [get_groupid(g)[0] for g in groupname]
+        print gids
+        if len(gids) == 0:
+            return (None, "", [])
+        return (gids[0], groupname, gids[1:])
     if groupname is None:
-        return (None, "")
+        return (None, "", [])
     try:
-        return (getgrnam(groupname).gr_gid, groupname)
+        return (getgrnam(groupname).gr_gid, groupname, [])
     except KeyError:
         print "Warning: group %s does not exist" % groupname 
-        return (None, "")
+        return (None, "", [])
 
-def prepare_and_demote(user_uid, user_gid):
+def prepare_and_demote(user_uid, user_gid, user_groups=[]):
     def result():
         os.setpgrp()
+        if len(user_groups) > 0:
+            os.setgroups(user_groups)
         if not user_gid is None:
             os.setgid(user_gid)
         if not user_uid is None:
@@ -180,7 +188,7 @@ class ProgramHandler(object):
                 self.attempts = self.attempts + 1
                 self.announce("Starting program (attempt %d)" % self.attempts)
 
-                preexec_fn = prepare_and_demote(self.user[0], self.group[0])
+                preexec_fn = prepare_and_demote(self.user[0], self.group[0], self.group[2])
                 self.process = subprocess.Popen(self.command, shell=False,
                                                 bufsize=0, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                                 env=self.environment, cwd=self.directory, preexec_fn=preexec_fn)
