@@ -216,6 +216,8 @@ class ProgramHandler(object):
             else:
                 self.announce("Execution stopped because of an error")
 
+            self.process = None
+
             if not self.running:
                 break
 
@@ -243,10 +245,17 @@ class ProgramHandler(object):
             self.running = False
             try:
                 if self.process:
+                    self.announce("Stopping program.")
                     self.process.terminate()  # send_signal(signal.CTRL_C_EVENT)
             except OSError:
                 pass
-        self.thread.join(1)
+        self.thread.join(5)
+        try:
+            if self.process:
+                self.announce("Escalating, killing program.")
+                self.process.kill()
+        except OSError:
+            pass
 
     def valid(self):
         # Is valid if it is running or it was not even executed
