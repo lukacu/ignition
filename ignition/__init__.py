@@ -97,7 +97,6 @@ def get_groupid(groupname):
     from grp import getgrnam
     if isinstance(groupname, list):
         gids = [get_groupid(g)[0] for g in groupname]
-        print gids
         if len(gids) == 0:
             return (None, "", [])
         return (gids[0], groupname, gids[1:])
