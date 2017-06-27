@@ -3,7 +3,7 @@ from __future__ import absolute_import
 import os
 import re
 import sys
-import time
+import time, datetime
 import subprocess
 import traceback
 import threading
@@ -166,9 +166,12 @@ class ProgramHandler(object):
             if not os.path.isdir(os.path.dirname(self.log)):
                 os.makedirs(os.path.dirname(self.log))
 
-        self.logfile = open(self.log, 'w') if not self.log is None else None
+        if kwargs.get("logappend", False):
+            self.logfile = open(self.log, 'w') if not self.log is None else None
+        else:
+            self.logfile = open(self.log, 'a') if not self.log is None else None
+            self.logfile.write("\n----- Starting log at %s ------\n\n" % datetime.datetime.now())
         self.attempts = 0
-
 
 
     def observe(self, observer):
@@ -206,6 +209,7 @@ class ProgramHandler(object):
                             ProgramHandler.mutex.release()
                         if not self.logfile is None:
                             self.logfile.write(logline)
+                            self.logfile.flush()
                     else:
                         break
 
@@ -276,6 +280,7 @@ class ProgramGroup(object):
         self.source = launchfile
         self.title = config.get("title", os.path.basename(launchfile))
         self.log = config.get("log", parent.log if not parent is None else None)
+        self.logappend = config.get("logappend", parent.logappend if not parent is None else False)
         self.user = config.get("user", parent.user if not parent is None else None)
         self.group = config.get("group", parent.group if not parent is None else None)
         self.programs = {}
@@ -302,6 +307,8 @@ class ProgramGroup(object):
                     parameters["group"] = self.group
                 if not parameters.has_key("log") and not self.log is None:
                     parameters["log"] = os.path.join(self.log, "%s.log" % identifier)
+                if not parameters.has_key("logappend"):
+                    parameters["logappend"] = self.logappend
                 if not parameters.has_key("command"):
                     continue
                 parameters["environment"] = mergevars(self.environment, parameters.get("environment", {}))
