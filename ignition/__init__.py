@@ -170,7 +170,8 @@ class ProgramHandler(object):
             self.logfile = open(self.log, 'w') if not self.log is None else None
         else:
             self.logfile = open(self.log, 'a') if not self.log is None else None
-            self.logfile.write("\n----- Starting log at %s ------\n\n" % datetime.datetime.now())
+            if not self.logfile is None:
+                self.logfile.write("\n----- Starting log at %s ------\n\n" % datetime.datetime.now())
         self.attempts = 0
 
 
