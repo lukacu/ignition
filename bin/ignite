@@ -47,8 +47,11 @@ if __name__ == '__main__':
         except KeyboardInterrupt:
             pass
 
-        group.stop()
         group.announce("Shutting down ...")
+        try:
+            group.stop()
+        except KeyboardInterrupt:
+            group.stop(True)
 
         sys.exit(0)
     else:

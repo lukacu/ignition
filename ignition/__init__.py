@@ -157,9 +157,6 @@ class ProgramHandler(object):
         self.color = ProgramHandler.color_pool[
             ProgramHandler.color_next % len(ProgramHandler.color_pool)]
         ProgramHandler.color_next = ProgramHandler.color_next + 1
-        if self.console and PLATFORM == "linux":
-            self.command.insert(0, 'stdbuf')
-            self.command.insert(1, '-oL')
         self.observers = []
 
         if not self.log is None:
@@ -191,8 +188,14 @@ class ProgramHandler(object):
                 self.attempts = self.attempts + 1
                 self.announce("Starting program (attempt %d)" % self.attempts)
 
+                full_command = self.command
+
+                if self.console and PLATFORM == "linux":
+                    full_command.insert(0, 'stdbuf')
+                    full_command.insert(1, '-oL')
+
                 preexec_fn = prepare_and_demote(self.user[0], self.group[0], self.group[2])
-                self.process = subprocess.Popen(self.command, shell=False,
+                self.process = subprocess.Popen(full_command, shell=False,
                                                 bufsize=0, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                                 env=self.environment, cwd=self.directory, preexec_fn=preexec_fn)
 
@@ -252,8 +255,8 @@ class ProgramHandler(object):
             self.logfile.write("\n")
         ProgramHandler.mutex.release()
 
-    def stop(self):
-        if self.running:
+    def stop(self, force=False):
+        if self.running and not force:
             self.running = False
             try:
                 if self.process:
@@ -261,7 +264,7 @@ class ProgramHandler(object):
                     self.process.terminate()  # send_signal(signal.CTRL_C_EVENT)
             except OSError:
                 pass
-        self.thread.join(5)
+            self.thread.join(5)
         try:
             if self.process:
                 self.announce("Escalating, killing program.")
@@ -347,12 +350,12 @@ class ProgramGroup(object):
                 self.plugins, 'on_program_started', self.programs[item])
         run_plugins(self.plugins, 'on_group_started', self)
 
-    def stop(self):
+    def stop(self, force=False):
         run_plugins(self.plugins, 'on_group_stop', self)
         for item in reversed(self.startup_sequence):
             run_plugins(
                 self.plugins, 'on_program_stop', self.programs[item])
-            self.programs[item].stop()
+            self.programs[item].stop(force)
             run_plugins(
                 self.plugins, 'on_program_stopped', self.programs[item])
         run_plugins(self.plugins, 'on_group_stopped', self)

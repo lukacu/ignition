@@ -18,6 +18,10 @@ class Debug(Plugin):
 		if program.debug:
 			program.command = self._prefix + program.command
 
+	def on_program_start(self, program, **kwargs):
+		if program.debug:
+			program.announce("Entering debug mode: %s" % program.command)
+
 class Wait(Plugin):
 
 	def __init__(self):
