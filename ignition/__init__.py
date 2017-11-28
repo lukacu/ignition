@@ -147,6 +147,7 @@ class ProgramHandler(object):
         self.running = False
         self.process = None
         self.log = log
+        self.logappend = kwargs.get("logappend", False)
         self.environment = os.environ.copy()
         self.environment.update(environment)
         self.console = kwargs.get("console", True)
@@ -158,17 +159,6 @@ class ProgramHandler(object):
             ProgramHandler.color_next % len(ProgramHandler.color_pool)]
         ProgramHandler.color_next = ProgramHandler.color_next + 1
         self.observers = []
-
-        if not self.log is None:
-            if not os.path.isdir(os.path.dirname(self.log)):
-                os.makedirs(os.path.dirname(self.log))
-
-        if kwargs.get("logappend", False):
-            self.logfile = open(self.log, 'w') if not self.log is None else None
-        else:
-            self.logfile = open(self.log, 'a') if not self.log is None else None
-            if not self.logfile is None:
-                self.logfile.write("\n----- Starting log at %s ------\n\n" % datetime.datetime.now())
         self.attempts = 0
 
 
@@ -182,6 +172,18 @@ class ProgramHandler(object):
 
     def run(self):
         self.running = True
+
+        if not self.log is None:
+            if not os.path.isdir(os.path.dirname(self.log)):
+                os.makedirs(os.path.dirname(self.log))
+
+        if self.logappend:
+            self.logfile = open(self.log, 'w') if not self.log is None else None
+        else:
+            self.logfile = open(self.log, 'a') if not self.log is None else None
+            if not self.logfile is None:
+                self.logfile.write("\n----- Starting log at %s ------\n\n" % datetime.datetime.now())
+
         while self.running:
             returncode = 0
             try:
@@ -283,6 +285,7 @@ class ProgramGroup(object):
         config = json.load(open(launchfile, 'r'))
         self.source = launchfile
         self.title = config.get("title", os.path.basename(launchfile))
+        self.description = config.get("description", "")
         self.log = config.get("log", parent.log if not parent is None else None)
         self.logappend = config.get("logappend", parent.logappend if not parent is None else False)
         self.user = config.get("user", parent.user if not parent is None else None)
@@ -318,8 +321,8 @@ class ProgramGroup(object):
                 parameters["environment"] = mergevars(self.environment, parameters.get("environment", {}))
                 item = ProgramHandler(identifier,
                                       **parameters)
-                run_plugins(
-                    self.plugins, 'on_program_init', item, **parameters)
+            run_plugins(
+                self.plugins, 'on_program_init', item, **parameters)
             self.programs[identifier] = item
 
         clean_dictionary(config, "plugins", "handle")
