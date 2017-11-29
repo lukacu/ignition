@@ -37,11 +37,12 @@ if __name__ == '__main__':
 
         signal.signal(signal.SIGTERM, shutdown_handler)
 
-        group.announce("Starting up ...")
-        group.start()
-        time.sleep(1)
-
         try:
+            group.announce("Starting up ...")
+            group.start()
+
+            time.sleep(1)
+            
             while group.valid() and running:
                 time.sleep(1)
         except KeyboardInterrupt:

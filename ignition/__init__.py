@@ -294,7 +294,6 @@ class ProgramGroup(object):
         self.parent = parent
         self.plugins = [import_plugin(p) for p in config.get("plugins", [])]
         self.environment = mergevars(parent.environment if parent else {}, config.get("environment", {}))
-        self.depends = config.get("depends", [])
         programs = config.get("programs", {})
 
         for identifier, parameters in programs.items():
@@ -304,6 +303,7 @@ class ProgramGroup(object):
                 root = os.path.dirname(self.source)
                 try:
                     item = ProgramGroup(os.path.join(root, parameters["include"]), self)
+                    item.depends = parameters.get("depends", [])
                 except ValueError, e:
                     print "Error opening %s: %s" % (os.path.join(root, parameters["include"]), e)
                     raise ValueError("Unable to load included launch file")
@@ -341,6 +341,7 @@ class ProgramGroup(object):
         sequence = []
         for block in blocks:
             sequence.extend(list(block))
+
         self.startup_sequence = sequence
 
     def start(self):
