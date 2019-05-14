@@ -160,7 +160,7 @@ class ProgramHandler(object):
         ProgramHandler.color_next = ProgramHandler.color_next + 1
         self.observers = []
         self.attempts = 0
-
+        self.logfile = None
 
     def observe(self, observer):
         self.observers.append(observer)
