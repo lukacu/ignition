@@ -14,8 +14,8 @@ import shlex
 from .graph import toposort
 
 # http://www.pixelbeat.org/programming/stdio_buffering/
-BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = xrange(30, 38)
-LIGHTBLACK, LIGHTRED, LIGHTGREEN, LIGHTYELLOW, LIGHTBLUE, LIGHTMAGENTA, LIGHTCYAN, LIGHTWHITE = xrange(
+BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = range(30, 38)
+LIGHTBLACK, LIGHTRED, LIGHTGREEN, LIGHTYELLOW, LIGHTBLUE, LIGHTMAGENTA, LIGHTCYAN, LIGHTWHITE = range(
     90, 98)
 
 # These are the escape sequences need to get colored ouput
@@ -90,7 +90,7 @@ def get_userid(username):
     try:
         return (getpwnam(username).pw_uid, username)
     except KeyError:
-        print "Warning: user %s does not exist" % username 
+        print("Warning: user %s does not exist" % username)
         return (None, "")
 
 def get_groupid(groupname):
@@ -105,7 +105,7 @@ def get_groupid(groupname):
     try:
         return (getgrnam(groupname).gr_gid, groupname, [])
     except KeyError:
-        print "Warning: group %s does not exist" % groupname 
+        print("Warning: group %s does not exist" % groupname)
         return (None, "", [])
 
 def prepare_and_demote(user_uid, user_gid, user_groups=[]):
@@ -206,6 +206,7 @@ class ProgramHandler(object):
                 while True:
                     logline = self.process.stdout.readline()
                     if logline:
+                        logline = logline.decode("utf-8")
                         if self.console:
                             ProgramHandler.mutex.acquire()
                             print_colored(
@@ -251,8 +252,8 @@ class ProgramHandler(object):
     def announce(self, message):
         ProgramHandler.mutex.acquire()
         print_colored("[%s]: " % self.identifier.ljust(20, ' '), self.color)
-        print message
-        if not self.logfile is None:
+        print(message)
+        if hasattr(self, "logfile") and not self.logfile is None:
             self.logfile.write(message)
             self.logfile.write("\n")
         ProgramHandler.mutex.release()
@@ -299,24 +300,24 @@ class ProgramGroup(object):
         for identifier, parameters in programs.items():
             if parameters.get("ignore", False):
                 continue
-            if parameters.has_key("include"):
+            if "include" in parameters:
                 root = os.path.dirname(self.source)
                 try:
                     item = ProgramGroup(os.path.join(root, parameters["include"]), self)
                     item.depends = parameters.get("depends", [])
-                except ValueError, e:
-                    print "Error opening %s: %s" % (os.path.join(root, parameters["include"]), e)
+                except ValueError as e:
+                    print("Error opening %s: %s" % (os.path.join(root, parameters["include"]), e))
                     raise ValueError("Unable to load included launch file")
             else:
-                if not parameters.has_key("user"):
+                if not "user" in parameters:
                     parameters["user"] = self.user
-                if not parameters.has_key("group"):
+                if not "group" in parameters:
                     parameters["group"] = self.group
-                if not parameters.has_key("log") and not self.log is None:
+                if not "log" in parameters and not self.log is None:
                     parameters["log"] = os.path.join(self.log, "%s.log" % identifier)
-                if not parameters.has_key("logappend"):
+                if not "logappend" in parameters:
                     parameters["logappend"] = self.logappend
-                if not parameters.has_key("command"):
+                if not "command" in parameters:
                     continue
                 parameters["environment"] = mergevars(self.environment, parameters.get("environment", {}))
                 item = ProgramHandler(identifier,
@@ -375,4 +376,4 @@ class ProgramGroup(object):
 
     def announce(self, message):
         print_colored(message, RED, True)
-        print ""
+        print("")
