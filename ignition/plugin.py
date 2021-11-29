@@ -2,6 +2,27 @@
 import shlex
 import time
 
+_plugin_cache = {}
+
+def get_plugins():
+    from attributee.containers import ReadonlyMapping
+    from importlib.metadata import entry_points
+    entrypoints = entry_points(group="ignition")
+    #pkgutil.iter_modules()
+    #return ReadonlyMapping(_plugin_cache)
+
+
+def import_plugin(cl):
+    d = cl.rfind(".")
+    classname = cl[d+1:len(cl)]
+    m = __import__(cl[0:d], globals(), locals(), [classname])
+    return getattr(m, classname)()
+
+def run_plugins(plugins, handle, *args, **kwargs):
+    for plugin in plugins:
+        if hasattr(plugin, handle):
+            getattr(plugin, handle)(*args, **kwargs)
+
 class Plugin(object):
 
     def __init__(self):
