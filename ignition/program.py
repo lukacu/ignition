@@ -307,7 +307,6 @@ class ProgramGroup(Attributee, Serializable):
     programs = Map(ProgramDescription())
 
     def __init__(self, *args, _source: str = None, **kwargs):
-        print(kwargs)
         super().__init__(*args, **kwargs)
         self._programs = {}
         self._source = _source
