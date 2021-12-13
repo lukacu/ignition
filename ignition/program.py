@@ -7,19 +7,28 @@ import subprocess
 import threading
 import json
 import shlex
+import signal
 
 from typing import Optional
 
 from attributee import Attributee, Include, List
 from attributee.containers import Map
 from attributee.object import Object
-from attributee.primitives import Boolean, Integer, String
+from attributee.primitives import Boolean, Enumeration, Integer, String
 from attributee.io import Serializable
 
 from . import is_linux
 from .graph import toposort
 from .output import print_colored, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE, LIGHTBLACK, LIGHTRED, LIGHTGREEN, LIGHTYELLOW, LIGHTBLUE, LIGHTMAGENTA, LIGHTCYAN, LIGHTWHITE
 from .plugin import run_plugins, Plugin
+
+_signals = {
+    "sigint": signal.SIGINT,
+    "interrupt": signal.SIGINT,
+    "term": signal.SIGTERM,
+    "user1": signal.SIGUSR1,
+    "user2": signal.SIGUSR2
+}
 
 def clean_dictionary(dictionary, *keys):
     for key in keys:
@@ -117,6 +126,9 @@ class ProgramHandler(Attributee):
     delay = Integer(val_min=0, default=0)
 
     mutex = threading.Lock()
+
+    signal = Enumeration(_signals, default="term")
+
     color_pool = (GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE, LIGHTBLACK,
                   LIGHTRED, LIGHTGREEN, LIGHTYELLOW, LIGHTBLUE, LIGHTMAGENTA, LIGHTCYAN, LIGHTWHITE)
     color_next = 0
@@ -247,7 +259,8 @@ class ProgramHandler(Attributee):
             try:
                 if self.process:
                     self.announce("Stopping program.")
-                    self.process.terminate()  # send_signal(signal.CTRL_C_EVENT)
+                    self.process.send_signal(self.signal)
+                    #self.process.terminate()  # send_signal(signal.CTRL_C_EVENT)
             except OSError:
                 pass
             self.thread.join(5)
