@@ -17,7 +17,7 @@ setup(name='ignition',
 	"Development Status :: 4 - Beta",
 	],
 	python_requires='>=3.5',
-	install_requires=["attributee>=0.1.3", "PyYAML>=6.0"],
+	install_requires=["attributee>=0.1.6", "PyYAML>=6.0"],
 		entry_points={
 		'console_scripts': [
 		    'ignite = ignition.__main__:main',

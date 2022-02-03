@@ -5,22 +5,20 @@ import sys
 import time, datetime
 import subprocess
 import threading
-import json
 import shlex
 import signal
+import itertools
 
-from typing import Optional
-
-from attributee import Attributee, Include, List
+from attributee import Attributee, Include, List, Unclaimed
 from attributee.containers import Map
-from attributee.object import Object
+from attributee.object import import_class
 from attributee.primitives import Boolean, Enumeration, Integer, String
 from attributee.io import Serializable
 
 from . import is_linux
 from .graph import toposort
 from .output import print_colored, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE, LIGHTBLACK, LIGHTRED, LIGHTGREEN, LIGHTYELLOW, LIGHTBLUE, LIGHTMAGENTA, LIGHTCYAN, LIGHTWHITE
-from .plugin import run_plugins, Plugin
+from .plugin import plugin_registry, run_plugins, Plugin
 
 _signals = {
     "sigint": signal.SIGINT,
@@ -107,11 +105,15 @@ class ProgramObserver(object):
     def on_stop(self, program):
         pass
 
+_TERMINAL_LOCK = threading.Lock()
+_COLOR_POOL = iter(itertools.cycle([GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE, LIGHTBLACK,
+                  LIGHTRED, LIGHTGREEN, LIGHTYELLOW, LIGHTBLUE, LIGHTMAGENTA, LIGHTCYAN, LIGHTWHITE]))
+
 class ProgramHandler(Attributee):
 
-    command = String()
-    directory = String(default=None)
-    environment = Map(String())
+    command = String(readonly=False)
+    directory = String(default=None, readonly=False)
+    environment = Map(String(), readonly=False)
 
     required = Boolean(default=False)
     restart = Boolean(default=False)
@@ -125,13 +127,9 @@ class ProgramHandler(Attributee):
 
     delay = Integer(val_min=0, default=0)
 
-    mutex = threading.Lock()
-
     signal = Enumeration(_signals, default="term")
 
-    color_pool = (GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE, LIGHTBLACK,
-                  LIGHTRED, LIGHTGREEN, LIGHTYELLOW, LIGHTBLUE, LIGHTMAGENTA, LIGHTCYAN, LIGHTWHITE)
-    color_next = 0
+    auxiliary = Unclaimed(description="Remaining arguments, enables plugin configuration")
 
     def __init__(self, *args, _identifier: str = None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -143,9 +141,7 @@ class ProgramHandler(Attributee):
 
         self._user_id = get_userid(self.user)
         self._group_id = get_groupid(self.group)
-        self.color = ProgramHandler.color_pool[
-            ProgramHandler.color_next % len(ProgramHandler.color_pool)]
-        ProgramHandler.color_next = ProgramHandler.color_next + 1
+        self.color = next(_COLOR_POOL)
         self.observers = []
         self.attempts = 0
         self.logfile = None
@@ -162,8 +158,7 @@ class ProgramHandler(Attributee):
         self.running = True
 
         if not self.log is None:
-            if not os.path.isdir(os.path.dirname(self.log)):
-                os.makedirs(os.path.dirname(self.log))
+            os.makedirs(os.path.dirname(self.log), exist_ok=True)
 
         environment = os.environ.copy()
         environment.update(self.environment)
@@ -203,12 +198,11 @@ class ProgramHandler(Attributee):
                     if logline:
                         logline = logline.decode("utf-8")
                         if self.console:
-                            ProgramHandler.mutex.acquire()
-                            print_colored(
-                                "[%s]: " % self.identifier.ljust(20, ' '), self.color)
-                            # new line is already present
-                            sys.stdout.write(logline)
-                            ProgramHandler.mutex.release()
+                            with _TERMINAL_LOCK:
+                                print_colored(
+                                    "[%s]: " % self.identifier.ljust(20, ' '), self.color)
+                                # new line is already present
+                                sys.stdout.write(logline)
                         if not self.logfile is None:
                             self.logfile.write(logline)
                             self.logfile.flush()
@@ -246,7 +240,7 @@ class ProgramHandler(Attributee):
             time.sleep(1)
 
     def announce(self, message):
-        with ProgramHandler.mutex:
+        with _TERMINAL_LOCK:
             print_colored("[%s]: " % self.identifier.ljust(20, ' '), self.color)
             print(message)
             if hasattr(self, "logfile") and not self.logfile is None:
@@ -316,7 +310,7 @@ class ProgramGroup(Attributee, Serializable):
     user = String(default=None)
     group = String(default=None)
     environment = Map(String())
-    plugins = List(Object(subclass=Plugin), default=[])
+    plugins = List(String(), default=[])
     programs = Map(ProgramDescription())
 
     def __init__(self, *args, _source: str = None, **kwargs):
@@ -324,13 +318,24 @@ class ProgramGroup(Attributee, Serializable):
         self._programs = {}
         self._source = _source
 
+        registry = plugin_registry()
+
+        def load_plugin(name):
+            if name in registry:
+                return registry[name]()
+            plugin_cls = import_class(name)
+            if issubclass(plugin_cls, Plugin):
+                return plugin_cls()
+        
+        self._plugins = [load_plugin(x) for x in self.plugins]
+
         for identifier, item in self.programs.items():
             if getattr(item, "ignore", False):
                 continue
             self._programs[identifier] = item
-            run_plugins(self.plugins, 'on_program_init', item)
+            run_plugins(self._plugins, 'on_program_init', item)
 
-        run_plugins(self.plugins, 'on_group_init', self)
+        run_plugins(self._plugins, 'on_group_init', self)
 
         graph = {}
         for i, program in self._programs.items():
@@ -349,24 +354,24 @@ class ProgramGroup(Attributee, Serializable):
         self.startup_sequence = sequence
 
     def start(self):
-        run_plugins(self.plugins, 'on_group_start', self)
+        run_plugins(self._plugins, 'on_group_start', self)
         for item in self.startup_sequence:
             run_plugins(
-                self.plugins, 'on_program_start', self._programs[item])
+                self._plugins, 'on_program_start', self._programs[item])
             self._programs[item].start()
             run_plugins(
-                self.plugins, 'on_program_started', self._programs[item])
-        run_plugins(self.plugins, 'on_group_started', self)
+                self._plugins, 'on_program_started', self._programs[item])
+        run_plugins(self._plugins, 'on_group_started', self)
 
     def stop(self, force=False):
-        run_plugins(self.plugins, 'on_group_stop', self)
+        run_plugins(self._plugins, 'on_group_stop', self)
         for item in reversed(self.startup_sequence):
             run_plugins(
-                self.plugins, 'on_program_stop', self._programs[item])
+                self._plugins, 'on_program_stop', self._programs[item])
             self._programs[item].stop(force)
             run_plugins(
-                self.plugins, 'on_program_stopped', self._programs[item])
-        run_plugins(self.plugins, 'on_group_stopped', self)
+                self._plugins, 'on_program_stopped', self._programs[item])
+        run_plugins(self._plugins, 'on_group_stopped', self)
 
     def valid(self):
         valid = 0
