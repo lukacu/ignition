@@ -52,7 +52,7 @@ class Debug(Plugin):
     def __init__(self):
         super(Debug, self).__init__()
         # TODO: only if gdb is available?
-        self._prefix = shlex.split("gdb --batch --quiet -ex run -ex \"bt\" -ex quit --args")
+        self._prefix = "gdb --batch --quiet -ex run -ex \"bt\" -ex quit --args  "
 
     def on_program_init(self, program):
         program._debug = program.auxiliary.get("debug", False)
