@@ -36,6 +36,7 @@ def main():
             pass
 
         group.announce("Shutting down ...")
+        
         try:
             group.stop()
         except KeyboardInterrupt:

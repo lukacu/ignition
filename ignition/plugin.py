@@ -2,6 +2,11 @@
 import shlex
 import time
 
+from attributee import Attributee, Include, List
+from attributee.containers import Map, Tuple
+from attributee.object import import_class
+from attributee.primitives import Boolean, Enumeration, Integer, String
+
 _plugin_cache = {}
 
 def plugin_registry():
@@ -13,6 +18,7 @@ def plugin_registry():
     if len(_plugin_cache) == 0:
         _plugin_cache["debug"] = Debug
         _plugin_cache["wait"] = Wait
+        _plugin_cache["docker"] = Docker
         _plugin_cache["exportenv"] = ExportEnvironment
 
         for entrypoint in entrypoints:
@@ -80,6 +86,39 @@ class Wait(Plugin):
         wait = getattr(program, "_wait", 0)
         if wait > 0:
             time.sleep(wait)
+
+class Docker(Plugin):
+
+    class ContainerConfig(Attributee):
+
+        image = String()
+        volumes = List(Tuple(String(), String(), separator=":"), default=[])
+        devices = List(Tuple(String(), String(), separator=":"), default=[])
+
+    def __init__(self):
+        super(Docker, self).__init__()
+
+    def on_program_init(self, program):
+        config = program.auxiliary.get("docker", None)
+        
+        def format_bind(x):
+            if len(x) == 1:
+                return "%s:%s" % (x[0], x[0])
+            if len(x) == 2:
+                return "%s:%s" % (x[0], x[1])
+        
+        if config is not None:
+            config = Docker.ContainerConfig(**config)
+            print(list(config.volumes))
+            volumes = " ".join(["-v %s" % format_bind(x) for x in config.volumes])
+            devices = " ".join(["--device %s" % format_bind(x) for x in config.devices])
+    
+            environment = " ".join(["--env %s=%s" % (k, v) for k, v in program.environment.items()])
+    
+            command = "docker run --sig-proxy --rm -t -a STDOUT -a STDERR %s %s %s %s " % (volumes, devices, environment, config.image)
+
+            program.command = command + program.command
+            print(program.command)
 
 class ExportEnvironment(Plugin):
 
